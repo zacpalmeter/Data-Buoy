@@ -3,7 +3,7 @@
 
 
 #include <math.h>
-//Hi josh this is my code
+
 int sensorPin = A0;    // select the input pin for the thermistor
 float sensorValue = 0;  // variable to store the value coming from the sensor
 double temperature[500];
