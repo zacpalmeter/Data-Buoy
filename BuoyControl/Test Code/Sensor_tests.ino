@@ -1,3 +1,7 @@
+///JOSH TEST
+
+
+
 #include <math.h>
 
 int sensorPin = A0;    // select the input pin for the thermistor
