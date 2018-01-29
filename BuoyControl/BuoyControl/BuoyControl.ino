@@ -89,7 +89,7 @@ double readThermistor(int sensorPin) {
   //Reads Thermistor and Filters signal
   sensorValue = analogRead(sensorPin);  //Read Analog signal
   sensorValue = sensorValue * (5.0 / (1023.0));  //Convert to voltage
-  //Calibration Equation
+  //Calibration Equation  
   temp = -12.531*pow(sensorValue, 3) + 118.81*pow(sensorValue, 2) - 413.27*sensorValue + 671.85;
   
   return temp;
@@ -127,7 +127,7 @@ void loop() {
     temperature[d_i] = readThermistor(A0);    //take temperature data from A0 pin
     //Filter temperature data using Extended Kalman Filter
     T_hat_k[d_i] = KalmanFilter(T_c, T_r, T_q, T_hat_k[d_i - 1], temperature[d_i], T_p_k[d_i - 1],T_p_k[d_i], T_hat_k[d_i]);
-   
+    
     ///////////////////////////////////////////////////
     //TESTING
     ///////////////////////////////////////////////////
