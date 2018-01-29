@@ -10,7 +10,6 @@
 #define dataLimit 100
 
 double temperature[dataLimit];  // allocate memory for temperature reading
-double turbidity[dataLimit];  // allocate memory for turbidity reading
 
 int d_i;             //Data reading increment
 
