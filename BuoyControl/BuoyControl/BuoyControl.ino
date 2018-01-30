@@ -7,7 +7,18 @@
 #include <math.h> //Include math library
 #include <avr/sleep.h>
 #include <avr/wdt.h>
+#include <Adafruit_GPS_Library\Adafruit_GPS.h>	//GPS: Calling the GPS library
+#include <SoftwareSerial\src\SoftwareSerial.h>	//GPS: Setting up the Serial functions
+
+SoftwareSerial mySerial(10, 11);	//GPS: Setting up the PWM ports for serial use
+Adafruit_GPS GPS(&mySerial);		//GPS: calling the ports to the GPS library
+
 #define dataLimit 100
+
+//Echoing the GPS to the serial console
+#define GPSECHO true			//GPS: set to to true to observe the raw GPS sentence 
+boolean usingInterrupt = false; //GPS:keeping track of the interrupt function
+void useInterrupt(boolean);
 
 double temperature[dataLimit];  // allocate memory for temperature reading
 
@@ -27,11 +38,58 @@ double T_q;      //Process noise covariance for Thermistor
 
 
 void setup() {
-  // the setup function runs once when you press reset or power the board
-  Serial.begin(9600);
-  pinMode(tempPower, OUTPUT);          // sets the digital pin 13 as output
-  initKalman();
+// the setup function runs once when you press reset or power the board
+Serial.begin(9600);
+pinMode(tempPower, OUTPUT);						// sets the digital pin 13 as output
+initKalman();
+
+//GPS: Setup
+GPS.begin(9600);
+mySerial.begin(9600);
+GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);	//Initializing RMC and GGA of NMEA sentences
+GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);		//Updating rate setting to 1Hz
+GPS.sendCommand(PGCMD_ANTENNA);					//asking for updates on the antenna statues
+//GPS: initializing the inturrupt function to read the data every millesecond (if needed)
+#ifdef __arm__
+usingInterrupt = false;							//NOTE - we don't want to use interrupts on the Due
+#else
+useInterrupt(true);
+#endif
+delay(1000);
+
 }
+
+
+#ifdef __AVR__
+// Interrupt is called once a millisecond, looks for any new GPS data, and stores it
+SIGNAL(TIMER0_COMPA_vect) {
+	char c = GPS.read();
+	/*
+#ifdef UDR0
+	if (GPSECHO)
+	if (c) UDR0 = c;	// writing direct to UDR0 is much much faster than Serial.print 
+						// but only one character can be written at a time. 
+#endif
+	*/
+}
+
+void useInterrupt(boolean v) {
+	if (v) {
+		// Timer0 is already used for millis() - we'll just interrupt somewhere
+		// in the middle and call the "Compare A" function above
+		OCR0A = 0xAF;
+		TIMSK0 |= _BV(OCIE0A);
+		usingInterrupt = true;
+	}
+	else {
+		// do not call the interrupt function COMPA anymore
+		TIMSK0 &= ~_BV(OCIE0A);
+		usingInterrupt = false;
+	}
+}
+#endif //#ifdef__AVR__
+
+uint32_t timer = millis();	//setting the timer
 
 // Watchdog Interrupt Service. This is executed when watchdog timed out.
 ISR(WDT_vect) 
@@ -104,6 +162,52 @@ void on(){
 
 }
 
+//I wasn't sure of the output of the GPS so I figured this would do for now, so we are able to test the whole system
+void gpsSensor() {
+	/* if you would like to debug and observe the NMEA sentence
+	if (!usingInterrupt) {
+		
+		char c = GPS.read();				// read data from the GPS in the 'main loop'
+		
+		if (GPSECHO)
+		if (c) Serial1.print(c);
+	}
+	*/
+	// if a sentence is received, we can check the checksum, parse it
+	if (GPS.newNMEAreceived()) {
+		
+		if (!GPS.parse(GPS.lastNMEA()))		// this also sets the newNMEAreceived() flag to false
+			return;							// we can fail to parse a sentence in which case we should just wait for another
+	}
+
+	
+	if (timer > millis())  timer = millis();// if millis() or timer wraps around, we'll just reset it
+
+	// approximately every 2 seconds or so, print out the current stats
+	if (millis() - timer > 2000) {
+		timer = millis();					// reset the timer
+
+		Serial.print("\nTime: ");
+		Serial.print(GPS.hour, DEC); Serial.print(':');
+		Serial.print(GPS.minute, DEC); Serial.print(':');
+		Serial.print(GPS.seconds, DEC); Serial.print('.');
+		Serial.println(GPS.milliseconds);
+		Serial.print("Date: ");
+		Serial.print(GPS.day, DEC); Serial.print('/');
+		Serial.print(GPS.month, DEC); Serial.print("/20");
+		Serial.println(GPS.year, DEC);
+
+		if (GPS.fix) {
+			Serial.print("Location: ");
+			Serial.print(GPS.latitude); Serial.print(GPS.lat);
+			Serial.print(", ");
+			Serial.print(GPS.longitude); Serial.println(GPS.lon);
+		}
+	}
+}
+
+
+
 
 void loop() {
   // this function loops repeatedly until a data limit is reached then it sleeps in 
@@ -129,7 +233,7 @@ void loop() {
     T_hat_k[d_i] = KalmanFilter(T_c, T_r, T_q, T_hat_k[d_i - 1], temperature[d_i], T_p_k[d_i - 1],T_p_k[d_i], T_hat_k[d_i]);
     
     ///////////////////////////////////////////////////
-    //TESTING
+	gpsSensor();
     ///////////////////////////////////////////////////
   /**/
     //print data to plotter for testing
