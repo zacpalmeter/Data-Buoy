@@ -366,7 +366,7 @@ void loop()
   WaitForResponse("AT^SISC=0\r","OK", 500, modemResponse);
   WaitForResponse("AT^SICA=1,3\r", "OK", 500, modemResponse);
   SendModemCommand("AT^SISO=0\r", "OK", 500, modemResponse);
-  SendModemCommand("AT^SISW=0,234\r", "^SISW: 0,234,0", 500, modemResponse);  //*******
+  SendModemCommand("AT^SISW=0,233\r", "^SISW: 0,233,0", 500, modemResponse);  //*******
   
   /*
    * HTTP POST example to dweet.io. Sends variables temp and pressure
@@ -376,15 +376,21 @@ void loop()
   Debug.println("Sending data to exosite");
   
   // Build string to send to dweet.io
-  http_command = "POST /dweet/for/45665482?hello=world HTTP/1.1\r\n\r\n"; //*******
+  http_command = "POST /onep:v1/stack/alias HTTP/1.1\n"; //*******
+  http_command += "Host: m2.exosite.com\n";
+  http_command += "X-Exosite-CIK: 5f76c698acb4a7094fb9bf96eeaac7655703d029\n";
+  http_command += "Content-Type: application/x-www-form-urlencoded; charset=utf-8\n";
+  http_command += "Accept: application/xhtml+xml\n";
+  http_command += "Content-Length: 9\n\n";
+  http_command += "temp=16.5";
+  Debug.print(http_command);
   SW_Serial.print(http_command);
   delay(5000);
   while (PrintModemResponse() > 0);
 
   // Print output
-  Debug.println("\nInformation sent to dweet.io.");
-  Debug.println("See https://dweet.io/get/latest/dweet/for/" + DEVICE_ID + " to verify");
-  delay(2000);
+  Debug.println("\nInformation sent to exosite.");
+  delay(20000);
 }
 
 // sends a command to the modem, waits for the specified number of milliseconds,
