@@ -1,4 +1,4 @@
-// Data transmission Code from Nimblink.com edited by Zechariah Palmeter
+// Data transmission Code from nimbelink.com edited by Zechariah Palmeter
 
 char temp_char; // need this before includes for some Arduino IDE versions
                 // otherwise "'Serial' was not declared in this scope" error occurs
@@ -9,48 +9,16 @@ char temp_char; // need this before includes for some Arduino IDE versions
 
 #define NL_SWDK          // Skywire Development Kit
 
-/*
- * Define Arduino type
- * Uncomment only one!
- * 
- * NOTE:
- *    Debug info on the Serial Monitor is unreliable when using
- *    the Arduino Uno with the Cat 1 modem (at any baud rate)
- */
 #define NL_ARDUINO_LEONARDO
-//#define NL_ARDUINO_UNO
 
-// the pinouts on the SWDK are not compatible with the Arduino Uno
-#if defined NL_ARDUINO_UNO && defined NL_SWDK
-#error Arduino + SWDK not supported
-#endif
 
-#if defined NL_ARDUINO_UNO && defined NL_SW_LTE_GELS3
-#pragma message("Debug info is unreliable for Arduino Uno + Cat 1 modem")
-#endif
-
-// Assign APN if 3G GSM or LTE Modem
-#if defined NL_SW_HSPAP || defined NL_SW_HSPAPG || defined NL_SW_HSPAPE || defined NL_SW_LTE_TSVG || defined NL_SW_LTE_TNAG || defined NL_SW_LTE_TEUG || defined NL_SW_LTE_GELS3
 /* -- CHANGE TO YOUR APN -- */
-  #define APN  (String)"NIMBLINK.GW12.VZWENTP"
-#endif
-
-/*
- *  Assign device ID
- *  Type your MEID/IMEI here
- *  MEID/IMEI is located on top of your Skywire modem
- */
-/* -- CHANGE TO YOUR DEVICE ID: IMEI OR MEID -- */
-#define DEVICE_ID (String)"45665482"
+#define APN  (String)"NIMBLINK.GW12.VZWENTP"
 
 // define Serial ports based on Arduino board type
-#if defined NL_ARDUINO_LEONARDO
-  #define Debug Serial
-  #define SW_Serial Serial1
-#elif defined NL_ARDUINO_UNO
-  #define Debug Serial
-  SoftwareSerial SW_Serial(2, 8);  // RX, TX
-#endif
+#define Debug Serial
+#define SW_Serial Serial1
+
 
 /* 
  *  define "Skywire_ON" signal level depending on shield type
@@ -59,20 +27,13 @@ char temp_char; // need this before includes for some Arduino IDE versions
  */ 
 #if defined NL_SWDK
   #define SW_ON LOW
-#elif defined NL_AB_ST_NCL
-  #define SW_ON HIGH
 #endif
 
-// initialize a few variables
-char incomingByte = 0;
-unsigned int dweetCtr = 0;
 
 // code that initializes the serial ports and modem, waits for valid network connection
 void setup()
 {
-  String currentString = "";
-  String modemResponse = "";
-  bool connectionGood = false;
+  String modemResponse = ""; // Modem responce to a command
   
   // initialize serial debug communication with PC over USB connection
   Debug.begin(115200);
@@ -83,7 +44,7 @@ void setup()
     Debug.println(q, DEC);
     delay(250);
   }
-  Debug.println("Socket Dial and Sending Information to Dweet.io Example");
+  Debug.println("Socket Dial To Send data to Exosite");
 
   // Start cellular modem
   Debug.println("Starting Cellular Modem");
@@ -108,22 +69,12 @@ void setup()
   // Turn on Skywire modem
   digitalWrite(12, SW_ON);
   
-  #if defined NL_SW_LTE_TSVG || defined NL_SW_LTE_TNAG || defined NL_SW_LTE_TEUG || defined NL_SW_HSPAP || defined NL_SW_HSPAPG || defined NL_SW_HSPAPE
-    delay(5100); // modem requires >5s pulse
-  #else
-    delay(1100); // modem requires >1s pulse
-  #endif
+  delay(1100); // modem requires >1s pulse
 
   // Return I/O pin 12 to input/hi-Z state  
   pinMode(12, INPUT);
   
-  #if defined NL_SW_LTE_TSVG || defined NL_SW_LTE_TNAG || defined NL_SW_LTE_TEUG
-    delay(15100); // Wait > 15 seconds for initialization
-  #elif defined NL_SW_LTE_GELS3
-    delay(30100); // Wait > 30 seconds for initialization
-  #else
-    delay(10100);
-  #endif 
+  delay(30100); // Wait > 30 seconds for initialization
   
   // Initialize serial port to communicate with modem
   Debug.println("Initializing modem COM port");
@@ -143,51 +94,30 @@ void setup()
   Debug.println("Reseting modem");
   #if defined NL_SW_LTE_GELS3
     WaitForResponse("AT+SOFTRESET\r", "OK", 500, modemResponse);
-  #else
-    WaitForResponse("ATZ\r", "OK", 500, modemResponse);
   #endif
   
   /* 
    *  In order for SoftwareSerial (only used with the Uno) to provide a reliable output,
    *  the data rate between the Arduino and Skywire modem must be lowered to 38400
    */ 
-  #if defined NL_ARDUINO_UNO
-    // change modem data rate
-    SW_Serial.print("AT+IPR=38400\r");
-    delay(1000);
-
-    // restart SoftwareSerial module at lower data rate
-    SW_Serial.end();
-    SW_Serial.begin(38400);
-    while (!SW_Serial) ;
-    while(PrintModemResponse() > 0) ; // print any characters sent after data rate change
-  #endif
 
   // turn off URC (unsolicited result code) messages for Cat 1 modem
   #if defined NL_SW_LTE_GELS3
     WaitForResponse("AT+CEREG=0\r", "OK", 500, modemResponse);
   #endif
 
-  //  SIM-based Skywire-specific setup
-  #if defined NL_SW_GPRS || defined NL_SW_HSPAP || defined NL_SW_HSPAPG || defined NL_SW_HSPAPE
-    // activate SIM detect
-    Debug.println("Activating SIM card detect");
-    WaitForResponse("AT#SIMDET=1\r", "OK", 500, modemResponse);
-  #endif
-
   // turn on verbose error messages
   WaitForResponse("AT+CMEE=2\r", "OK", 1000, modemResponse);
   
-  #if defined NL_SW_GPRS || defined NL_SW_HSPAP || defined NL_SW_HSPAPG || defined NL_SW_HSPAPE || defined NL_SW_LTE_TSVG || defined NL_SW_LTE_TNAG || defined NL_SW_LTE_TEUG || defined NL_SW_LTE_GELS3
+  #if defined NL_SW_LTE_GELS3
     // Setup PDP context
     Debug.println("Setting up PDP context");
-    String pdp;
 
     //*********
     SendModemCommand("AT^SISC=0\r","OK", 500, modemResponse);
     WaitForResponse("AT^SISS=0,\"srvType\",\"Socket\"\r","OK", 500, modemResponse);
-    WaitForResponse("AT^SISS=0,\"conId\",3\r","OK", 500, modemResponse);
-    WaitForResponse("AT^SISS=0,\"address\",\"socktcp://m2.exosite.com:80\"\r","OK", 500, modemResponse); //*******
+    WaitForResponse("AT^SISS=0,\"conId\",3\r","OK", 500, modemResponse); // Set to use PDP context 3
+    WaitForResponse("AT^SISS=0,\"address\",\"socktcp://m2.exosite.com:80\"\r","OK", 500, modemResponse); // Configure socket to use TCP on port 80
     
     delay(10000);
   #endif
@@ -199,47 +129,8 @@ void setup()
   WaitForResponse("AT+CGMR\r", "OK", 500, modemResponse);
 
   // activate PDP context
-  bool contextActivated = false;
   String modemResp = "";
   
-  /*
-  // Check for network connection
-  Debug.println("Waiting for network connection");
-  connectionGood = false;
-  while(!connectionGood)
-  {
-    // send command to modem to get network status
-    #if defined NL_SW_1xRTT_A || defined NL_SW_1xRTT_S || defined NL_SW_1xRTT_V || defined NL_SW_EVDO_A || defined NL_SW_EVDO_V
-      SW_Serial.print("AT+CREG?\r");
-    #elif defined NL_SW_LTE_GELS3
-      SW_Serial.print("AT+CEREG?\r");
-    #else
-      SW_Serial.print("AT+CGREG?\r");
-    #endif
-    currentString = "";
-    delay(1000);
-    
-    // Read serial port buffer1 for UART connected to modem and print that message back out to debug serial over USB
-    while(SW_Serial.available() > 0) 
-    {
-      //read incoming byte from modem
-      incomingByte=SW_Serial.read();
-      //write byte out to debug serial over USB
-      Debug.print(incomingByte);
-      
-      // add current byte to the string we are building
-      currentString += char(incomingByte);
-  
-      // check currentString to see if network status is "0,1" or "0,5" which means we are connected
-      if((currentString.substring(currentString.length()-3, currentString.length()) == "0,1") || 
-         (currentString.substring(currentString.length()-3, currentString.length()) == "0,5"))
-      {
-        connectionGood = true;
-        while(PrintModemResponse() > 0);  // consume rest of message once 0,1 or 0,5 is found
-      }
-    }
-  }
-*/
   delay(2000);
 }
 
@@ -247,20 +138,16 @@ void setup()
 void loop()
 {
   String modemResponse = "";
-  int http_timeout = 0;
   
-  // increment dummy counter to send to dweet
-  //dweetCtr = (dweetCtr + 1) % 100;  
-  
-  // Setup HTTP connection to dweet.io
+  // Setup HTTP connection to exosite
   Debug.println("Setting up connection");
   WaitForResponse("AT^SICA=1,3\r", "OK", 500, modemResponse);
   WaitForResponse("AT^SISO=0\r", "OK", 500, modemResponse);
   SendModemCommand("AT^SISW=0,233\r", "^SISW: 0,233,0", 500, modemResponse);  //*******
   
   /*
-   * HTTP POST example to dweet.io. Sends variables temp and pressure
-   * to dweet.io page for your device ID
+   * Send data to exosite with post command
+   * Use varName=value with appropriate content length for each data point
    */
   String http_command;
   Debug.println("Sending data to exosite");
@@ -272,11 +159,12 @@ void loop()
   http_command += "Content-Type: application/x-www-form-urlencoded; charset=utf-8\n";
   http_command += "Accept: application/xhtml+xml\n";
   http_command += "Content-Length: 9\n\n";
-  http_command += "temp=30.4";
+  http_command += "temp=25.5";
   Debug.print(http_command);
   SW_Serial.print(http_command);
   delay(5000);
   while (PrintModemResponse() > 0);
+  // Could put code here to check for data transmission error "+CME ERROR" 
 
   WaitForResponse("AT^SISC=0\r","OK", 500, modemResponse); // Close connection
   
