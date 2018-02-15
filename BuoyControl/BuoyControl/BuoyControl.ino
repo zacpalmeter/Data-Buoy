@@ -29,6 +29,10 @@
 #if defined NL_SWDK
   #define SW_ON LOW
 #endif
+
+float transmitTemperature; // Value of temperature to transmit
+float transmitSalinity; // Value of Salinity to transmit
+String transmitGPS; // GPS location in DDMM.MMMM_DDMM.MMMM
 /* End Data Tranmission Definitions */
 
 SoftwareSerial GPS_Serial(50, 51);	//GPS: Setting up the PWM ports for serial use
@@ -343,7 +347,7 @@ void sendData() {
   Debug.println("Setting up connection");
   WaitForResponse("AT^SICA=1,3\r", "OK", 500, modemResponse);
   WaitForResponse("AT^SISO=0\r", "OK", 500, modemResponse);
-  SendModemCommand("AT^SISW=0,233\r", "^SISW: 0,233,0", 500, modemResponse);  //*******
+  SendModemCommand("AT^SISW=0,233\r", "^SISW: 0,233,0", 500, modemResponse);  // Set command length to total number of characters of the POST command http_command
   
   /*
    * Send data to exosite with post command
@@ -358,7 +362,7 @@ void sendData() {
   http_command += "X-Exosite-CIK: 5f76c698acb4a7094fb9bf96eeaac7655703d029\n";
   http_command += "Content-Type: application/x-www-form-urlencoded; charset=utf-8\n";
   http_command += "Accept: application/xhtml+xml\n";
-  http_command += "Content-Length: 9\n\n";
+  http_command += "Content-Length: 9\n\n"; // Set content length to number of characters in next line
   http_command += "temp=24.5";
   Debug.print(http_command);
   SW_Serial.print(http_command);
