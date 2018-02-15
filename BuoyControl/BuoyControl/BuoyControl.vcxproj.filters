@@ -17,5 +17,9 @@
   <ItemGroup>
     <None Include="BuoyControl.ino" />
   </ItemGroup>
- 
+  <ItemGroup>
+    <ClInclude Include="__vm\.BuoyControl.vsarduino.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
 </Project>

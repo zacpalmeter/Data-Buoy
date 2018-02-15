@@ -115,8 +115,8 @@ char temp_char; // need this before includes for some Arduino IDE versions
  *    - J3 and J4 should have jumpers between pins 1 and 2
 
  */
-#define NL_SWDK          // Skywire Development Kit
-//#define NL_AB_ST_NCL       // Skywire Arduino Shield
+//#define NL_SWDK          // Skywire Development Kit
+#define NL_AB_ST_NCL       // Skywire Arduino Shield
 
 /*
  * Define Arduino type
@@ -141,7 +141,7 @@ char temp_char; // need this before includes for some Arduino IDE versions
 // Assign APN if 3G GSM or LTE Modem
 #if defined NL_SW_HSPAP || defined NL_SW_HSPAPG || defined NL_SW_HSPAPE || defined NL_SW_LTE_TSVG || defined NL_SW_LTE_TNAG || defined NL_SW_LTE_TEUG || defined NL_SW_LTE_GELS3
 /* -- CHANGE TO YOUR APN -- */
-  #define APN  (String)"NIMBLINK.GW12.VZWENTP"
+  #define APN  (String)"your_apn_here"
 #endif
 
 /*
@@ -150,7 +150,7 @@ char temp_char; // need this before includes for some Arduino IDE versions
  *  MEID/IMEI is located on top of your Skywire modem
  */
 /* -- CHANGE TO YOUR DEVICE ID: IMEI OR MEID -- */
-#define DEVICE_ID (String)"45665482"
+#define DEVICE_ID (String)"your_device_id_here"
 
 // define Serial ports based on Arduino board type
 #if defined NL_ARDUINO_LEONARDO
@@ -291,13 +291,22 @@ void setup()
     // Setup PDP context
     Debug.println("Setting up PDP context");
     String pdp;
-
-    //*********
-    SendModemCommand("AT^SISC=0\r","OK", 500, modemResponse);
-    WaitForResponse("AT^SISS=0,\"srvType\",\"Socket\"\r","OK", 500, modemResponse);
-    WaitForResponse("AT^SISS=0,\"conId\",3\r","OK", 500, modemResponse);
-    WaitForResponse("AT^SISS=0,\"address\",\"socktcp://m2.exosite.com:80\"\r","OK", 500, modemResponse); //*******
     
+    #if defined NL_SW_LTE_TSVG
+      // deactivate context and set context configuration
+      WaitForResponse("AT#SGACT=3,0\r", "OK", 1000, modemResponse);
+      WaitForResponse("AT#SCFG=3,3,300,90,600,50\r", "OK", 1000, modemResponse);
+      pdp = "AT+CGDCONT=3,\"IP\",\"" + APN + "\"\r";
+    #elif defined NL_SW_LTE_GELS3
+      WaitForResponse("AT+CGACT=0,3\r", "OK", 1000, modemResponse);
+      WaitForResponse("AT+SQNSCFG=3,3,300,90,600,50\r", "OK", 1000, modemResponse);
+      pdp = "AT+CGDCONT=3,\"IP\",\"" + APN + "\"\r";
+    #else
+      WaitForResponse("AT#SGACT=1,0\r", "OK", 1000, modemResponse);
+      pdp = "AT+CGDCONT=1,\"IP\",\"" + APN + "\"\r";
+    #endif
+    
+    WaitForResponse(pdp, "OK", 2000, modemResponse); 
     delay(10000);
   #endif
 
@@ -311,7 +320,43 @@ void setup()
   bool contextActivated = false;
   String modemResp = "";
   
-  /*
+  // wait for successful context activation
+  while(!contextActivated)
+  {
+    #if defined NL_SW_LTE_TSVG
+      SW_Serial.print("AT#SGACT=3,1\r");
+    #elif defined NL_SW_LTE_GELS3
+      SW_Serial.print("AT+CGACT=1,3\r");
+    #else
+      SW_Serial.print("AT#SGACT=1,1\r");
+    #endif
+    delay(5000);
+    
+    modemResp = GetModemResponse();
+    Debug.println(modemResp);
+    
+    if (modemResp.indexOf("OK") >= 0)
+    {
+      Debug.println("Activation Successful");
+      contextActivated = true;
+    }
+    else
+    {
+      Debug.println("Activation Failed");
+
+      // deactivate context before trying again
+      #if defined NL_SW_LTE_TSVG
+        WaitForResponse("AT#SGACT=3,0\r", "OK", 1000, modemResponse);
+      #elif defined NL_SW_LTE_GELS3
+        WaitForResponse("AT+CGACT=0,3\r", "OK", 1000, modemResponse);
+      #else
+        WaitForResponse("AT#SGACT=1,0\r", "OK", 1000, modemResponse);
+      #endif
+    }
+    delay(100);
+    while(SW_Serial.available()) SW_Serial.read();  // consume any remaining bytes
+  }
+  
   // Check for network connection
   Debug.println("Waiting for network connection");
   connectionGood = false;
@@ -348,7 +393,7 @@ void setup()
       }
     }
   }
-*/
+
   delay(2000);
 }
 
@@ -359,39 +404,67 @@ void loop()
   int http_timeout = 0;
   
   // increment dummy counter to send to dweet
-  //dweetCtr = (dweetCtr + 1) % 100;  
+  dweetCtr = (dweetCtr + 1) % 100;  
   
   // Setup HTTP connection to dweet.io
-  Debug.println("Setting up connection");
-  WaitForResponse("AT^SICA=1,3\r", "OK", 500, modemResponse);
-  WaitForResponse("AT^SISO=0\r", "OK", 500, modemResponse);
-  SendModemCommand("AT^SISW=0,233\r", "^SISW: 0,233,0", 500, modemResponse);  //*******
-  
+  Debug.println("Initiating Socket Dial");
+  #if defined NL_SW_LTE_TSVG
+    WaitForResponse("AT#SD=3,0,80,\"dweet.io\"\r", "CONNECT", 2000, modemResponse);
+  #elif defined NL_SW_LTE_GELS3
+    WaitForResponse("AT+SQNSD=3,0,80,\"dweet.io\"\r", "CONNECT", 2000, modemResponse);
+  #else         // all other Skywire modems
+    WaitForResponse("AT#SD=1,0,80,\"dweet.io\"\r", "CONNECT", 2000, modemResponse);
+  #endif
   /*
    * HTTP POST example to dweet.io. Sends variables temp and pressure
    * to dweet.io page for your device ID
    */
+  float temp = 12.34;
+  float pressure = 56.78;
   String http_command;
-  Debug.println("Sending data to exosite");
+  Debug.println("Sending data to dweet.io");
   
   // Build string to send to dweet.io
-  http_command = "POST /onep:v1/stack/alias HTTP/1.1\n"; //*******
-  http_command += "Host: m2.exosite.com\n";
-  http_command += "X-Exosite-CIK: 5f76c698acb4a7094fb9bf96eeaac7655703d029\n";
-  http_command += "Content-Type: application/x-www-form-urlencoded; charset=utf-8\n";
-  http_command += "Accept: application/xhtml+xml\n";
-  http_command += "Content-Length: 9\n\n";
-  http_command += "temp=30.4";
-  Debug.print(http_command);
+  http_command = "POST /dweet/for/" + DEVICE_ID + "?temperature=" + temp + "&pressure=" + pressure + "&counter=" + String(dweetCtr) + " HTTP/1.1\r\n\r\n";
   SW_Serial.print(http_command);
   delay(5000);
   while (PrintModemResponse() > 0);
 
-  WaitForResponse("AT^SISC=0\r","OK", 500, modemResponse); // Close connection
-  
   // Print output
-  Debug.println("\nInformation sent to exosite.");
-  delay(60000);
+  Debug.println("\nInformation sent to dweet.io.");
+  Debug.println("See https://dweet.io/get/latest/dweet/for/" + DEVICE_ID + " to verify");
+  delay(2000);
+
+  /*
+   * HTTP GET example for dweet.io. Gets information from your device ID
+   * and prints it to the screen.
+   */
+  Debug.println("\r\nGetting data from dweet.io");
+  
+  // Build string to send to dweet.io
+  http_command = "GET /get/latest/dweet/for/" + DEVICE_ID + " HTTP/1.1\r\n\r\n";
+  SW_Serial.print(http_command);
+  while (!SW_Serial.available() && http_timeout < 1000) // wait for receive or timeout
+  {
+    http_timeout++;
+    delay(10);
+  }
+  while (PrintModemResponse() > 0);
+
+  // close connection to dweet.io
+  #if defined NL_SW_LTE_TSVG
+    WaitForResponse("AT#SH=3\r", "OK", 1000, modemResponse);
+  #elif defined NL_SW_LTE_GELS3
+    SW_Serial.print("+++\r");   // escape sequence for Cat 1 modem
+    delay(1000);
+    while(SW_Serial.available()) SW_Serial.read();
+    WaitForResponse("AT+SQNSH=3\r", "OK", 1000, modemResponse);
+  #else
+    WaitForResponse("AT#SH=1\r", "OK", 1000, modemResponse);
+  #endif
+
+  delay(1000);
+  while(PrintModemResponse() > 0);  // print remaining characters (if any)
 }
 
 // sends a command to the modem, waits for the specified number of milliseconds,
