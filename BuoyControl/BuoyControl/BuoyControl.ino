@@ -269,8 +269,6 @@ double KalmanFilter(double c, double r, double q, double xhat_0, double z_k, dou
   return xhat_k;
 }
 
-// the loop function runs over and over again until power down or reset
-
 double readThermistor(int sensorPin) {
   double temp;
   double sensorValue = 0;  // variable to store the value coming from the sensor
@@ -290,7 +288,40 @@ void on(){
    //first value Temperature for Kalman Filter
    temperature[0] =readThermistor(A0);
    T_hat_k[0] = temperature[0];  // start at last known reading!
+}
 
+// Returns the average value of the array
+double average (double * array, int len)
+{
+  double sum = 0;  // sum will be larger than an item, long for safety.
+  for (int i = 0 ; i < len ; i++)
+    sum += array [i] ;
+  return  ((double) sum) / len ;  // average will be fractional, so float may be appropriate.
+}
+
+// Formats the temperature, salinity, and GPS coordinates to a string to send to exosite
+String formatData(){
+  String dataLine = "";
+  String temperatureString = "";
+  String salinityString = "";
+  
+  // Get average temperature
+  transmitTemperature = average(temperature,100);
+  temperatureString = String(transmitTemperature);
+  temperatureString.remove(5);
+  dataLine += "temp="+ temperatureString;
+  dataLine += "&";
+
+  // Salinity
+  salinityString = String(transmitSalinity);
+  salinityString.remove(5);
+  dataLine += "salinity=" + salinityString;
+  dataLine += "&";
+
+  // GPS
+  dataLine += "GPSdata=" + transmitGPS;
+  
+  return dataLine;
 }
 
 //I wasn't sure of the output of the GPS so I figured this would do for now, so we are able to test the whole system
@@ -336,6 +367,8 @@ void gpsSensor() {
 			Serial.print(GPS.longitude); Serial.println(GPS.lon);
 		}
 	}
+
+ transmitGPS = "4488.7667_-6870.3348";
 }
 
 /* Data Transmission Functions */
@@ -347,13 +380,14 @@ void sendData() {
   Debug.println("Setting up connection");
   WaitForResponse("AT^SICA=1,3\r", "OK", 500, modemResponse);
   WaitForResponse("AT^SISO=0\r", "OK", 500, modemResponse);
-  SendModemCommand("AT^SISW=0,233\r", "^SISW: 0,233,0", 500, modemResponse);  // Set command length to total number of characters of the POST command http_command
+  SendModemCommand("AT^SISW=0,279\r", "^SISW: 0,279,0", 500, modemResponse);  // Set command length to total number of characters of the POST command http_command
   
   /*
    * Send data to exosite with post command
    * Use varName=value with appropriate content length for each data point
    */
   String http_command;
+  String dataString = formatData();
   Debug.println("Sending data to exosite");
   
   // Build string to send to exosite
@@ -362,8 +396,8 @@ void sendData() {
   http_command += "X-Exosite-CIK: 5f76c698acb4a7094fb9bf96eeaac7655703d029\n";
   http_command += "Content-Type: application/x-www-form-urlencoded; charset=utf-8\n";
   http_command += "Accept: application/xhtml+xml\n";
-  http_command += "Content-Length: 9\n\n"; // Set content length to number of characters in next line
-  http_command += "temp=24.5";
+  http_command += "Content-Length: 54\n\n"; // Set content length to number of characters in next line
+  http_command += dataString;
   Debug.print(http_command);
   SW_Serial.print(http_command);
   delay(5000);
@@ -371,7 +405,7 @@ void sendData() {
   // Could put code here to check for data transmission error "+CME ERROR" 
 
   WaitForResponse("AT^SISC=0\r","OK", 500, modemResponse); // Close connection
-  
+
   // Print output
   Debug.println("\nInformation sent to exosite.");
 }
@@ -467,38 +501,32 @@ int PrintModemResponse()
 void loop() {
   // this function loops repeatedly until a data limit is reached then it sleeps in 
   // a low power state and overwrites the data.
-  sendData();
+
+  
+  
   
   on();  //inserted for seemless data loop
-  if (d_i>=dataLimit){           // when does data taking needs to stop?
-    //////////////////////////////////////////////////
-    //Insert time for one hour later!
-    ///////////////////////////////////////////////////
-  //  enterSleep(0b100001);  // 8 seconds
-  //  enterSleep(0b100001);  // 8 seconds
-  //  enterSleep(0b100000);  // 4 seconds
-    ///////////////////////////////////////////////////
-    d_i=1; // turns on data taking again
-    }
-  else {
-    ///////////////////////////////////////////////////
-    //Insert Data Taking Below!
-    ///////////////////////////////////////////////////
-    temperature[d_i] = readThermistor(A0);    //take temperature data from A0 pin
+  for (d_i = 1; d_i < dataLimit; d_i++){
+    /////////Take temperature reading///////////
+     temperature[d_i] = readThermistor(A0);    //take temperature data from A0 pin
     //Filter temperature data using Extended Kalman Filter
     T_hat_k[d_i] = KalmanFilter(T_c, T_r, T_q, T_hat_k[d_i - 1], temperature[d_i], T_p_k[d_i - 1],T_p_k[d_i], T_hat_k[d_i]);
-    
-    ///////////////////////////////////////////////////
-	gpsSensor();
-    ///////////////////////////////////////////////////
-  /**/
     //print data to plotter for testing
     Serial.print(temperature[d_i]);
     Serial.print("\t");
     Serial.println(T_hat_k[d_i]);//*/
-    ///////////////////////////////////////////////////
-     d_i++;  //next data point
-    
+    /////////////////////////////////////////////
+    delay(100);  // somewhat of a delay
   }
-  delay(100);  // somewhat of a delay
+
+  transmitSalinity = 20.0; // Placeholer for salinity value
+  
+  gpsSensor();
+
+  sendData();
+  //  enterSleep(0b100001);  // 8 seconds
+  //  enterSleep(0b100001);  // 8 seconds
+  //  enterSleep(0b100000);  // 4 seconds
+  
+  delay(60000);
 }
