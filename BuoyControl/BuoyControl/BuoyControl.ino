@@ -9,8 +9,10 @@
 #include <math.h> //Include math library
 #include <avr/sleep.h>
 #include <avr/wdt.h>
-#include <Adafruit_GPS.h>
+#include <Adafruit_GPS.h>	// Adafruit's custom library for their GPS
 #include <SoftwareSerial.h> // For communication with the modem
+#include <VernierLib.h>		// Library for Vernier sensors
+
 
 /* Data Transmission Definitions */
 #define NL_SW_LTE_GELS3   // VZW LTE Cat 1 Modem
@@ -47,8 +49,13 @@ void useInterrupt(boolean);
 
 double temperature[dataLimit];  // allocate memory for temperature reading
 
-int d_i;             //Data reading increment
+// creating global variable for salinity
+float salinitySensor;
+double salave;
+double saltot;
+double d_ii;
 
+int d_i;             //Data reading increment
 //Kalman Filtering Variables
 //Thermistor
 int tempPower = 52;
@@ -70,6 +77,8 @@ void setup() {
 pinMode(tempPower, OUTPUT);						// sets the digital pin 52 as output
 initKalman();
 
+/* Salinity setup */
+Vernier.autoID();								// Calls from the custom Vernier library
 
 /* GPS Setup */
 GPS.begin(9600);
@@ -282,6 +291,14 @@ double readThermistor(int sensorPin) {
   return temp;
 }
 
+double vernierSensor(/*double d_ii*/) {
+	double salinitySensor = Vernier.readSensor();
+	//saltot = (saltot + salinitySensor)/d_ii;
+
+
+	return salinitySensor;
+
+}
 
 void on(){
   // data taking on
@@ -516,10 +533,10 @@ void loop() {
     Serial.print("\t");
     Serial.println(T_hat_k[d_i]);//*/
     /////////////////////////////////////////////
-    delay(100);  // somewhat of a delay
+		delay(100);  // somewhat of a delay
   }
-
-  transmitSalinity = 20.0; // Placeholer for salinity value
+ 
+  transmitSalinity = vernierSensor(); // Placeholer for salinity value
   
   gpsSensor();
 
