@@ -11,7 +11,6 @@
 #include <avr/wdt.h>
 #include <Adafruit_GPS.h>	// Adafruit's custom library for their GPS
 #include <SoftwareSerial.h> // For communication with the modem
-#include <VernierLib.h>		// Library for Vernier sensors
 
 
 /* Data Transmission Definitions */
@@ -32,7 +31,7 @@
   #define SW_ON LOW
 #endif
 
-float transmitTemperature; // Value of temperature to transmit
+float transmitTemperature; // Value of temperature to transmitcm
 float transmitSalinity; // Value of Salinity to transmit
 String transmitGPS; // GPS location in DDMM.MMMM_DDMM.MMMM
 /* End Data Tranmission Definitions */
@@ -58,6 +57,7 @@ double d_ii;
 int d_i;             //Data reading increment
 //Kalman Filtering Variables
 //Thermistor
+int analogTherm = A3;
 int tempPower = 52;
 double T_p_k[dataLimit];   //init prior error covariance.
 double T_hat_k[dataLimit]; //init temperature estimation
@@ -73,29 +73,24 @@ void setup() {
 // the setup function runs once when you press reset or power the board
 //Serial.begin(9600);
 
-/* Thermister setup */
-pinMode(tempPower, OUTPUT);						// sets the digital pin 52 as output
+/* Thermistor setup */
+pinMode(tempPower, OUTPUT);            // sets the digital pin 52 as output
 initKalman();
 
-/* Salinity setup */
-Vernier.autoID();								// Calls from the custom Vernier library
-
-/* GPS Setup */
+ /* GPS Setup */
 GPS.begin(9600);
 GPS_Serial.begin(9600);
-GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);	//Initializing RMC and GGA of NMEA sentences
-GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);		//Updating rate setting to 1Hz
-GPS.sendCommand(PGCMD_ANTENNA);					//asking for updates on the antenna statues
+GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);  //Initializing RMC and GGA of NMEA sentences
+GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);    //Updating rate setting to 1Hz
+GPS.sendCommand(PGCMD_ANTENNA);         //asking for updates on the antenna statues
 //GPS: initializing the inturrupt function to read the data every millesecond (if needed)
 #ifdef __arm__
-usingInterrupt = false;							//NOTE - we don't want to use interrupts on the Due
+usingInterrupt = false;             //NOTE - we don't want to use interrupts on the Due
 #else
 useInterrupt(true);
 #endif
 delay(1000);
 /* End GPS Setup */
-
-
 /* Modem Setup */
 String modemResponse = ""; // Modem responce to a command
   
@@ -197,6 +192,7 @@ String modemResponse = ""; // Modem responce to a command
   
   delay(2000);
   /* End Modem Setup */
+
 }
 
 
@@ -291,19 +287,10 @@ double readThermistor(int sensorPin) {
   return temp;
 }
 
-double vernierSensor(/*double d_ii*/) {
-	double salinitySensor = Vernier.readSensor();
-	//saltot = (saltot + salinitySensor)/d_ii;
-
-
-	return salinitySensor;
-
-}
-
 void on(){
-  // data taking on
+  //kalman data taking on
    //first value Temperature for Kalman Filter
-   temperature[0] =readThermistor(A0);
+   temperature[0] =readThermistor(analogTherm);
    T_hat_k[0] = temperature[0];  // start at last known reading!
 }
 
@@ -323,7 +310,7 @@ String formatData(){
   String salinityString = "";
   
   // Get average temperature
-  transmitTemperature = average(temperature,100);
+  transmitTemperature = average(T_hat_k,100);
   temperatureString = String(transmitTemperature);
   temperatureString.remove(5);
   dataLine += "temp="+ temperatureString;
@@ -385,7 +372,7 @@ void gpsSensor() {
 		}
 	}
 
- transmitGPS = "4488.7667_-6870.3348";
+ transmitGPS = "44.8831_-68.67";
 }
 
 /* Data Transmission Functions */
@@ -515,29 +502,27 @@ int PrintModemResponse()
 
 
 
+
 void loop() {
   // this function loops repeatedly until a data limit is reached then it sleeps in 
   // a low power state and overwrites the data.
 
-  
-  
-  
   on();  //inserted for seemless data loop
   for (d_i = 1; d_i < dataLimit; d_i++){
     /////////Take temperature reading///////////
-     temperature[d_i] = readThermistor(A0);    //take temperature data from A0 pin
+     temperature[d_i] = readThermistor(analogTherm);    //take temperature data from A0 pin
     //Filter temperature data using Extended Kalman Filter
     T_hat_k[d_i] = KalmanFilter(T_c, T_r, T_q, T_hat_k[d_i - 1], temperature[d_i], T_p_k[d_i - 1],T_p_k[d_i], T_hat_k[d_i]);
     //print data to plotter for testing
-    Serial.print(temperature[d_i]);
-    Serial.print("\t");
-    Serial.println(T_hat_k[d_i]);//*/
+   // Serial.print(temperature[d_i]);
+   // Serial.print("\t");
+   // Serial.println(T_hat_k[d_i]);//*/
     /////////////////////////////////////////////
 		delay(100);  // somewhat of a delay
   }
  
-  transmitSalinity = vernierSensor(); // Placeholer for salinity value
-  
+  transmitSalinity = 20; //read one data value // Placeholer for salinity value
+ 
   gpsSensor();
 
   sendData();
@@ -545,5 +530,5 @@ void loop() {
   //  enterSleep(0b100001);  // 8 seconds
   //  enterSleep(0b100000);  // 4 seconds
   
-  delay(60000);
+  delay(5000);
 }
