@@ -15,6 +15,7 @@
 #include <TinyGPS++.h> //GPS LIBRARY FOR PARSING NMEA
 TinyGPSPlus gps;
 
+
 /* Data Transmission Definitions */
 #define NL_SW_LTE_GELS3   // VZW LTE Cat 1 Modem
 #define NL_SWDK          // Skywire Development Kit
