@@ -11,14 +11,15 @@
 #include <math.h> //Include math library
 #include <avr/sleep.h>
 #include <avr/wdt.h>
+#include <Adafruit_GPS.h>
 #include <SoftwareSerial.h> // For communication with the modem
-#include <TinyGPS++.h> //GPS LIBRARY FOR PARSING NMEA
-TinyGPSPlus gps;
+
 
 /* Data Transmission Definitions */
 #define NL_SW_LTE_GELS3   // VZW LTE Cat 1 Modem
 #define NL_SWDK          // Skywire Development Kit
 #define APN  (String)"NIMBLINK.GW12.VZWENTP" //* -- CHANGE TO YOUR APN, this is the APN for a Nimbeling verizon data plan
+
 
 
 // define Serial ports for Arduino Mega 2560
@@ -39,16 +40,19 @@ float transmitSalinity; // Value of Salinity to transmit
 String transmitGPS; // GPS location in DDMM.MMMM_DDMM.MMMM
 /* End Data Tranmission Definitions */
 
-
+SoftwareSerial GPS_Serial(50, 51);	//GPS: Setting up the PWM ports for serial use
+Adafruit_GPS GPS(&GPS_Serial);		//GPS: calling the ports to the GPS library
 
 #define dataLimit 100
-#define gpsLimit 150
 
+//Echoing the GPS to the serial console
+#define GPSECHO true			//GPS: set to to true to observe the raw GPS sentence 
+boolean usingInterrupt = false; //GPS:keeping track of the interrupt function
 void useInterrupt(boolean);
 
 double temperature[dataLimit];  // allocate memory for temperature reading
-double gpsLat[dataLimit];  // allocate memory for latitude reading
-double gpsLon[dataLimit];  // allocate memory for longitude reading
+
+int d_i;             //Data reading increment
 
 //Kalman Filtering Variables
 //Thermistor
@@ -61,30 +65,36 @@ double T_r;       //Measurement noise covariance. Thermistor fluctuates ? degree
 double T_q;      //Process noise covariance for Thermistor
 //Salinity Sensor
 int salPin = A0;
-
 /////////////////////////////////////////////////////////////////////////////////////
 
 
 void setup() {
 // the setup function runs once when you press reset or power the board
-Serial.begin(9600);
+//Serial.begin(9600);
 
 /* Thermister setup */
 pinMode(tempPower, OUTPUT);						// sets the digital pin 52 as output
-/*End thermistor setup*/
-/*Kalman Filter setup*/
 initKalman();
-/*end Filter Setup*/
 
-/*GPS Setup*/
-  Serial3.begin(9600);      // default NMEA GPS baud
-/*End GPS Setup*/
-//modemSetup();
+//Vernier.autoID();
 
-}
+/* GPS Setup */
+GPS.begin(9600);
+GPS_Serial.begin(9600);
+GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);	//Initializing RMC and GGA of NMEA sentences
+GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);		//Updating rate setting to 1Hz
+GPS.sendCommand(PGCMD_ANTENNA);					//asking for updates on the antenna statues
+//GPS: initializing the inturrupt function to read the data every millesecond (if needed)
+#ifdef __arm__
+usingInterrupt = false;							//NOTE - we don't want to use interrupts on the Due
+#else
+useInterrupt(true);
+#endif
+delay(1000);
+/* End GPS Setup */
 
-void modemSetup(){
-  /* Modem Setup */
+
+/* Modem Setup */
 String modemResponse = ""; // Modem responce to a command
   
   // initialize serial debug communication with PC over USB connection
@@ -188,6 +198,115 @@ String modemResponse = ""; // Modem responce to a command
 }
 
 
+#ifdef __AVR__
+// Interrupt is called once a millisecond, looks for any new GPS data, and stores it
+SIGNAL(TIMER0_COMPA_vect) {
+	char c = GPS.read();
+	/*
+#ifdef UDR0
+	if (GPSECHO)
+	if (c) UDR0 = c;	// writing direct to UDR0 is much much faster than Serial.print 
+						// but only one character can be written at a time. 
+#endif
+	*/
+}
+
+void useInterrupt(boolean v) {
+	if (v) {
+		// Timer0 is already used for millis() - we'll just interrupt somewhere
+		// in the middle and call the "Compare A" function above
+		OCR0A = 0xAF;
+		TIMSK0 |= _BV(OCIE0A);
+		usingInterrupt = true;
+	}
+	else {
+		// do not call the interrupt function COMPA anymore
+		TIMSK0 &= ~_BV(OCIE0A);
+		usingInterrupt = false;
+	}
+}
+#endif //#ifdef__AVR__
+
+uint32_t timer = millis();	//setting the timer
+
+// Watchdog Interrupt Service. This is executed when watchdog timed out.
+ISR(WDT_vect) 
+{
+  wdt_disable();  // disable watchdog
+}
+
+
+void enterSleep(const byte interval)
+{
+  MCUSR = 0;                          // reset various flags
+  WDTCSR |= 0b00011000;               // see docs, set WDCE, WDE
+  WDTCSR =  0b01000000 | interval;    // set WDIE, and appropriate delay
+
+  wdt_reset();
+  set_sleep_mode (SLEEP_MODE_PWR_DOWN);  
+  sleep_mode();            // now goes to Sleep and waits for the interrupt
+  } 
+
+
+void initKalman() {
+   d_i = 1;    //Start at 1 for first increment value for Kalman estimate
+   //Thermistor Setup
+   T_c = 1;    //Measurement State space. Basically Thermistor is sole contributor
+   T_r = 0.55;  //Measurement noise covariance. Thermistor fluctuates .55 degrees on avg 
+   T_q = 0.25; //Process noise covariance for Thermistor
+   T_p_k[0] = 1; // Thermistor's prior error covariance. Assume safe start at 1
+   //Turbidity Sensor Setup
+  
+}
+
+
+double KalmanFilter(double c, double r, double q, double xhat_0, double z_k, double p_k_0, double p_k, double xhat_k) {
+// Stand alone Extended Kalman Filter, filters out a signal based on state space, noise estimates, and measurements
+// Provides one estimation point in real time
+    double g; //init kalman gain
+  //predict
+  xhat_k = xhat_0;  // estimate future prediction based on prior prediction
+  p_k = p_k_0 + q;  // prior error covariance.
+
+  //update
+  g = p_k * c / (c*p_k*c + r);  //Kalman gain
+
+  xhat_k = xhat_k + g * (z_k - c * xhat_k);    //update estimate
+  p_k = (1 - g * c)*p_k;             //estimate error covariance
+  return xhat_k;
+}
+
+double readThermistor(int sensorPin) {
+  double temp;
+  double sensorValue = 0;  // variable to store the value coming from the sensor
+  digitalWrite(tempPower,HIGH);
+  //Reads Thermistor and Filters signal
+  sensorValue = analogRead(sensorPin);  //Read Analog signal
+  sensorValue = sensorValue * (5.0 / (1023.0));  //Convert to voltage
+  //Calibration Equation  
+  temp = -12.531*pow(sensorValue, 3) + 118.81*pow(sensorValue, 2) - 413.27*sensorValue + 671.85;
+  
+  return temp;
+}
+
+
+double readSal(int sensorPin) {
+  double salVal = analogRead(sensorPin);  //Read Analog signal
+  double salVolt = salVal * (5.0 / (1024.0));  //Convert to voltage
+  //Calibration Equation  
+  double sal = salVolt*16.3;
+  
+  return sal;
+}
+
+
+void on(){
+  // data taking on
+   //first value Temperature for Kalman Filter
+   temperature[0] =readThermistor(A0);
+   T_hat_k[0] = temperature[0];  // start at last known reading!
+}
+
 // Returns the average value of the array
 double average (double * array, int len)
 {
@@ -222,6 +341,52 @@ String formatData(){
   return dataLine;
 }
 
+//I wasn't sure of the output of the GPS so I figured this would do for now, so we are able to test the whole system
+//Exosite expects the coordinates to come in the format: DDMM.MMMM_DDMM.MMMM
+void gpsSensor() {
+	/* if you would like to debug and observe the NMEA sentence
+	if (!usingInterrupt) {
+		
+		char c = GPS.read();				// read data from the GPS in the 'main loop'
+		
+		if (GPSECHO)
+		if (c) Serial1.print(c);
+	}
+	*/
+	// if a sentence is received, we can check the checksum, parse it
+	if (GPS.newNMEAreceived()) {
+		
+		if (!GPS.parse(GPS.lastNMEA()))		// this also sets the newNMEAreceived() flag to false
+			return;							// we can fail to parse a sentence in which case we should just wait for another
+	}
+
+	
+	if (timer > millis())  timer = millis();// if millis() or timer wraps around, we'll just reset it
+
+	// approximately every 2 seconds or so, print out the current stats
+	if (millis() - timer > 2000) {
+		timer = millis();					// reset the timer
+
+		Serial.print("\nTime: ");
+		Serial.print(GPS.hour, DEC); Serial.print(':');
+		Serial.print(GPS.minute, DEC); Serial.print(':');
+		Serial.print(GPS.seconds, DEC); Serial.print('.');
+		Serial.println(GPS.milliseconds);
+		Serial.print("Date: ");
+		Serial.print(GPS.day, DEC); Serial.print('/');
+		Serial.print(GPS.month, DEC); Serial.print("/20");
+		Serial.println(GPS.year, DEC);
+
+		if (GPS.fix) {
+			Serial.print("Location: ");
+			Serial.print(GPS.latitude); Serial.print(GPS.lat);
+			Serial.print(", ");
+			Serial.print(GPS.longitude); Serial.println(GPS.lon);
+		}
+	}
+
+ transmitGPS = "4488.7667_-6870.3348";
+}
 
 /* Data Transmission Functions */
 // Transmits data to exosite, data should be stored in strings transmitTemperature, transmitSalinity, transmitGPS
@@ -350,164 +515,35 @@ int PrintModemResponse()
 
 
 
-
-//I wasn't sure of the output of the GPS so I figured this would do for now, so we are able to test the whole system
-//Exosite expects the coordinates to come in the format: DDMM.MMMM_DDMM.MMMM
-void gpsSensor() {
-   uint8_t x;
-  char gpsdata[65];
-  String deg_latCoord;
-  String deg_lonCoord;
-  String latCoord;
-  String lonCoord;
-  String latCoord1;
-  String lonCoord1;
-  
-  double decimal_degrees;
-  double minutes_lon;
-   double minutes_lat;
-  double seconds;
-  double tenths;
-  int lat_degr;
-  int lon_degr;
-  String coord;
-
-
- while (Serial3.available()) {
-    char c = Serial3.read();
-    gps.encode(c);
-    if (gps.location.isUpdated())
-  {
-  
-    deg_latCoord = String(gps.location.lat(),10);
-    deg_lonCoord = String(gps.location.lng(),10);
-    //lat
-    decimal_degrees = deg_latCoord.toFloat(); 
-    lat_degr = int(decimal_degrees);
-    minutes_lat = fabs(((decimal_degrees)-(lat_degr))*60.0);
-
-  
-    latCoord1 = String(int(lat_degr))+String((minutes_lat),6);
-    
-    //lon 
-    decimal_degrees = deg_lonCoord.toFloat(); 
-    lon_degr = int(decimal_degrees);
-    minutes_lon = fabs(((decimal_degrees)-(lon_degr))*60.0);
-    
-    lonCoord1 = String(int(lon_degr))+String((minutes_lon),6);
-    coord = latCoord1+"_"+lonCoord1;
-    transmitGPS = coord;
-    
- }
- 
-    
-    
-  }
-
-}
-
-
-uint32_t timer = millis();  //setting the timer
-
-// Watchdog Interrupt Service. This is executed when watchdog timed out.
-ISR(WDT_vect) 
-{
-  wdt_disable();  // disable watchdog
-}
-
-
-void enterSleep(const byte interval)
-{
-  MCUSR = 0;                          // reset various flags
-  WDTCSR |= 0b00011000;               // see docs, set WDCE, WDE
-  WDTCSR =  0b01000000 | interval;    // set WDIE, and appropriate delay
-
-  wdt_reset();
-  set_sleep_mode (SLEEP_MODE_PWR_DOWN);  
-  sleep_mode();            // now goes to Sleep and waits for the interrupt
-  } 
-
-
-void initKalman() {
-    //Thermistor Setup
-   T_c = 1;    //Measurement State space. Basically Thermistor is sole contributor
-   T_r = 0.55;  //Measurement noise covariance. Thermistor fluctuates .55 degrees on avg 
-   T_q = 0.25; //Process noise covariance for Thermistor
-   T_p_k[0] = 1; // Thermistor's prior error covariance. Assume safe start at 1
-}
-
-
-double KalmanFilter(double c, double r, double q, double xhat_0, double z_k, double p_k_0, double p_k, double xhat_k) {
-// Stand alone Extended Kalman Filter, filters out a signal based on state space, noise estimates, and measurements
-// Provides one estimation point in real time
-    double g; //init kalman gain
-  //predict
-  xhat_k = xhat_0;  // estimate future prediction based on prior prediction
-  p_k = p_k_0 + q;  // prior error covariance.
-
-  //update
-  g = p_k * c / (c*p_k*c + r);  //Kalman gain
-
-  xhat_k = xhat_k + g * (z_k - c * xhat_k);    //update estimate
-  p_k = (1 - g * c)*p_k;             //estimate error covariance
-  return xhat_k;
-}
-
-double readThermistor(int sensorPin) {
-  double temp;
-  double sensorValue = 0;  // variable to store the value coming from the sensor
-  digitalWrite(tempPower,HIGH);
-  //Reads Thermistor and Filters signal
-  sensorValue = analogRead(sensorPin);  //Read Analog signal
-  sensorValue = sensorValue * (5.0 / (1023.0));  //Convert to voltage
-  //Calibration Equation  
-  temp = -12.531*pow(sensorValue, 3) + 118.81*pow(sensorValue, 2) - 413.27*sensorValue + 671.85;
-  
-  return temp;
-}
-
-
-double readSal(int sensorPin) {
-  double salVal = analogRead(sensorPin);  //Read Analog signal
-  double salVolt = salVal * (5.0 / (1024.0));  //Convert to voltage
-  //Calibration Equation  
-  double sal = salVolt*16.3;
-  
-  return sal;
-}
-
-
-void on(){
-  // data taking on
-   //first value Temperature for Kalman Filter
-   temperature[0] =readThermistor(A0);
-   T_hat_k[0] = temperature[0];  // start at last known reading!
-}
-
 void loop() {
   // this function loops repeatedly until a data limit is reached then it sleeps in 
   // a low power state and overwrites the data.
+
   
-/////////Take temperature reading///////////
-   on();  //inserted for seemless data loop for kalman filtered variables
-  for (int d_i = 1; d_i < dataLimit; d_i++){
+  
+  
+  on();  //inserted for seemless data loop
+  for (d_i = 1; d_i < dataLimit; d_i++){
+    /////////Take temperature reading///////////
      temperature[d_i] = readThermistor(tempPin);    //take temperature data from A0 pin
     //Filter temperature data using Extended Kalman Filter
     T_hat_k[d_i] = KalmanFilter(T_c, T_r, T_q, T_hat_k[d_i - 1], temperature[d_i], T_p_k[d_i - 1],T_p_k[d_i], T_hat_k[d_i]);
+    //print data to plotter for testing
+   // Serial.print(temperature[d_i]);
+   // Serial.print("\t");
+   // Serial.println(T_hat_k[d_i]);//*/
+    /////////////////////////////////////////////
+    delay(100);  // somewhat of a delay
   }
-/////////Take Salinity reading ////////////
-  transmitSalinity = readSal(salPin);
-///////// Get gps location ////////////////
-  for(int i =0; i<1000;i++){ // make sure we get some data!
-  gpsSensor();
-  }
-    delay(100); // somewhat of a delay
 
-/////////Send data and then sleep in low power mode////////////////////////
- // sendData();
-   // enterSleep(0b100001);  // 8 seconds
-   // enterSleep(0b100001);  // 8 seconds
-   // enterSleep(0b100000);  // 4 seconds
+  transmitSalinity = readSal(salPin);
   
- 
+  gpsSensor();
+
+  sendData();
+  //  enterSleep(0b100001);  // 8 seconds
+  //  enterSleep(0b100001);  // 8 seconds
+  //  enterSleep(0b100000);  // 4 seconds
+  
+  delay(5000);
 }
