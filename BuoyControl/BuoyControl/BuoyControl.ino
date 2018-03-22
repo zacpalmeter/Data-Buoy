@@ -498,13 +498,18 @@ void loop() {
     T_hat_k[d_i] = KalmanFilter(T_c, T_r, T_q, T_hat_k[d_i - 1], temperature[d_i], T_p_k[d_i - 1],T_p_k[d_i], T_hat_k[d_i]);
  }
 
-  transmitSalinity = readSal(A9);// Placeholer for salinity value
+  transmitSalinity = readSal(A9);// Salinity value
 
   transmitGPS = gpsSensor();
   delay(300);
   sendData();
   delay(300);
-  enterSleep(0b100001);  // 8 seconds
+
+  for (int i = 0; i<450; i++)
+  {
+    enterSleep(0b100001);  // 8 seconds
+  }
+  
   
   //  enterSleep(0b100001);  // 8 seconds
   //  enterSleep(0b100000);  // 4 seconds
