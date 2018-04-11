@@ -270,6 +270,10 @@ String formatData(){
 
   // Salinity
   salinityString = String(transmitSalinity);
+  if(salinityString.length() < 5)
+  {
+    salinityString = "0" + salinityString;
+  }
   salinityString.remove(5);
   dataLine += "salinity=" + salinityString;
   dataLine += "&";
@@ -318,14 +322,14 @@ String gpsSensor() {
     minutes_lat = fabs(((decimal_degrees)-(lat_degr))*60.0);
 
   
-    latCoord1 = String(int(lat_degr))+String((minutes_lat),6);
+    latCoord1 = String(int(lat_degr))+String((minutes_lat),4);
     
     //lon 
     decimal_degrees = deg_lonCoord.toFloat(); 
     lon_degr = int(decimal_degrees);
     minutes_lon = fabs(((decimal_degrees)-(lon_degr))*60.0);
     
-    lonCoord1 = String(int(lon_degr))+String((minutes_lon),6);
+    lonCoord1 = String(int(lon_degr))+String((minutes_lon),4);
     coord = latCoord1+"_"+lonCoord1;
    //Serial.println(coord); 
     return coord;
