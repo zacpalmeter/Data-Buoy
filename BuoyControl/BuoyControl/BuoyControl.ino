@@ -505,6 +505,7 @@ void loop() {
   sendData();
   delay(300);
 
+  // Sleep for 1 hour
   for (int i = 0; i<450; i++)
   {
     enterSleep(0b100001);  // 8 seconds
