@@ -43,6 +43,7 @@ String transmitGPS; // GPS location in DDMM.MMMM_DDMM.MMMM
 
 #define dataLimit 100
 
+int boardPower = 52;
 
 double temperature[dataLimit];  // allocate memory for temperature reading
 
@@ -50,7 +51,6 @@ int d_i;             //Data reading increment
 
 //Kalman Filtering Variables
 //Thermistor
-int tempPower = 52;
 double T_p_k[dataLimit];   //init prior error covariance.
 double T_hat_k[dataLimit]; //init temperature estimation
 double T_c;          //Measurement State space. Basically Thermistor is sole contributor
@@ -66,7 +66,7 @@ void setup() {
 //Serial.begin(9600);
 
 /* Thermister setup */
-pinMode(tempPower, OUTPUT);           // sets the digital pin 52 as output
+pinMode(boardPower, OUTPUT);           // sets the digital pin 52 as output
 initKalman();
 Serial3.begin(9600);      // default NMEA GPS baud
 modemSetup();
@@ -228,7 +228,6 @@ double KalmanFilter(double c, double r, double q, double xhat_0, double z_k, dou
 double readThermistor(int sensorPin) {
   double temp;
   double sensorValue = 0;  // variable to store the value coming from the sensor
-  digitalWrite(tempPower,HIGH);
   //Reads Thermistor and Filters signal
   sensorValue = analogRead(sensorPin);  //Read Analog signal
   sensorValue = sensorValue * (5.0 / (1023.0));  //Convert to voltage
@@ -493,7 +492,7 @@ int PrintModemResponse()
 void loop() {
   // this function loops repeatedly until a data limit is reached then it sleeps in 
   // a low power state and overwrites the data.
-  
+    digitalWrite(boardPower,HIGH);
   on();  //inserted for seemless data loop for kalman filter functions
  for (d_i = 1; d_i < dataLimit; d_i++){
     /////////Take temperature reading///////////
@@ -508,6 +507,8 @@ void loop() {
   delay(300);
   sendData();
   delay(300);
+  
+  digitalWrite(boardPower,LOW);
 
   // Sleep for 1 hour
   for (int i = 0; i<450; i++)
